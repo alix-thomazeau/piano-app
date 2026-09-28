@@ -306,7 +306,7 @@ document.querySelectorAll('#seg-mode button').forEach(b => b.addEventListener('c
 }));
 
 function setBpm(v, save = true) {
-  v = Math.min(200, Math.max(20, v));
+  v = Math.min(200, Math.max(5, v));
   auto.setBpm(v);
   $('#bpm-val').textContent = v;
   if (save && current) {

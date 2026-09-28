@@ -38,11 +38,19 @@ export class AutoPlayer {
     else this.syncFromPractice();
     this.playing = true;
     const spb = 60 / this.bpm;
-    // décompte : une mesure de clics avant de démarrer
-    const countIn = this.bpMeasure;
-    this.t0 = this.ctx.currentTime + 0.1 + countIn * spb;
+    // décompte avant de démarrer : une mesure de clics ; en tempo très lent (un temps > 1,5 s),
+    // 3 bips à une seconde d'intervalle pour ne pas attendre 10 s
+    const now = this.ctx.currentTime + 0.1;
     this.pos0 = this.pos;
-    this.nextClick = Math.ceil(this.pos - countIn - 1e-6);
+    if (spb > 1.5) {
+      for (let k = 0; k < 3; k++) this._click(now + k, k === 0);
+      this.t0 = now + 3;
+      this.nextClick = Math.ceil(this.pos - 1e-6);
+    } else {
+      const countIn = this.bpMeasure;
+      this.t0 = now + countIn * spb;
+      this.nextClick = Math.ceil(this.pos - countIn - 1e-6);
+    }
     this.nextNoteStep = this.practice.idx;
     this._scheduler = setInterval(() => this._schedule(), 25);
     this._schedule();

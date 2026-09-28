@@ -1,5 +1,5 @@
 // Fonctionnement hors-ligne : fichiers de l'app en « réseau d'abord », bibliothèques CDN en cache.
-const VERSION = 'pc-v3';
+const VERSION = 'pc-v4';
 const APP = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/listener.js', 'js/score.js', 'js/keyboard.js',
