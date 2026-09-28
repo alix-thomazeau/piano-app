@@ -1,9 +1,9 @@
 // Fonctionnement hors-ligne : fichiers de l'app en « réseau d'abord », bibliothèques CDN en cache.
-const VERSION = 'pc-v1';
+const VERSION = 'pc-v2';
 const APP = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/listener.js', 'js/score.js', 'js/keyboard.js',
-  'js/sheet.js', 'js/roll.js', 'js/practice.js',
+  'js/sheet.js', 'js/roll.js', 'js/practice.js', 'js/autoplay.js',
   'demo/ode-a-la-joie.musicxml', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
 const CDN = [

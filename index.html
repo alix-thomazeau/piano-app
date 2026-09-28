@@ -43,6 +43,10 @@
     <button class="btn ghost" id="btn-back" aria-label="Retour">‹</button>
     <h2 id="practice-title" class="title-ellipsis"></h2>
     <div class="spacer"></div>
+    <div class="seg" id="seg-mode" role="group" aria-label="Mode">
+      <button data-mode="listen" class="on">🎙️ Écoute</button>
+      <button data-mode="auto">▶ Lecture</button>
+    </div>
     <div class="seg" id="seg-view" role="group" aria-label="Affichage">
       <button data-v="sheet" class="on">Partition</button>
       <button data-v="roll">Notes</button>
@@ -64,8 +68,9 @@
     <div id="practice-overlay" class="overlay">
       <div class="card">
         <h3>Prêt ?</h3>
-        <p>Pose l'iPad sur le pupitre. L'app écoute ton piano et attend que tu joues la bonne note.</p>
-        <button class="btn primary big" id="btn-start-mic">🎙️ Commencer avec le micro</button>
+        <p><b>Écoute</b> : l'app entend ton piano et attend la bonne note.<br><b>Lecture</b> : la partition avance toute seule, à la vitesse choisie.</p>
+        <button class="btn primary big" id="btn-start-mic">🎙️ Écoute (micro)</button>
+        <button class="btn primary big" id="btn-start-auto">▶ Lecture automatique</button>
         <button class="btn ghost" id="btn-start-touch">Sans micro (toucher le clavier)</button>
         <p class="small muted" id="mic-error"></p>
       </div>
@@ -88,8 +93,21 @@
     <button class="btn ghost" id="btn-next" title="Passer cette note">▶</button>
     <span class="progress-txt" id="progress-txt"></span>
     <div class="spacer"></div>
+    <div class="auto-ctrl hidden" id="auto-ctrl">
+      <button class="btn primary" id="btn-play" title="Lecture / pause">▶</button>
+      <button class="btn ghost" id="bpm-minus" title="Plus lent">−</button>
+      <span class="bpm"><b id="bpm-val">60</b> <small>bpm</small></span>
+      <button class="btn ghost" id="bpm-plus" title="Plus vite">+</button>
+      <button class="btn ghost toggle on" id="btn-metro" title="Métronome">🔔</button>
+      <button class="btn ghost toggle" id="btn-sound" title="Entendre les notes">🔊</button>
+    </div>
+    <button class="btn ghost toggle" id="btn-fingers" title="Modifier les doigtés">✏️ Doigtés</button>
     <span class="mic-state" id="mic-state"><span class="dot"></span><span class="meter"><i id="mic-meter"></i></span></span>
   </footer>
+  <div class="finger-panel hidden" id="finger-panel">
+    <span class="small muted">Touche un chiffre pour changer le doigté de la note (◀ ▶ pour passer d'une note à l'autre)</span>
+    <div id="finger-rows"></div>
+  </div>
   <div id="keyboard" class="keyboard"></div>
 </section>
 
@@ -115,10 +133,10 @@
       <ol class="small">
         <li>Pose l'iPad sur le pupitre, comme pendant la pratique.</li>
         <li>Appuie sur ⏺, attends 3 s en silence.</li>
-        <li>Joue les touches blanches <b>une par une</b>, du Do grave (Do2) au Do aigu (Do6), environ 1 note par seconde, en relâchant chaque note.</li>
-        <li>Puis 3 fois la même note (Mi4), fort puis doux.</li>
+        <li>Joue les touches blanches <b>une par une</b>, du Do1 au Do5 (le Do du milieu du clavier est le Do3), environ 1 note par seconde, en relâchant chaque note.</li>
+        <li>Puis 3 fois la même note (Mi3), fort puis doux.</li>
         <li>Puis quelques accords tenus 2 s (Do-Mi-Sol, La-Do-Mi, Sol-Si-Ré).</li>
-        <li>Enfin l'Ode à la joie à ton rythme, deux mains.</li>
+        <li>Enfin l'Ode à la joie à ton rythme, deux mains (en mode Écoute).</li>
         <li>Appuie sur ⏹, puis <b>Partager</b> → enregistre le fichier dans OneDrive (dossier Claude).</li>
       </ol>
       <div class="row">

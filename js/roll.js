@@ -15,6 +15,7 @@ export class Roll {
     this.handOk = () => true;
     this.sat = new Set();
     this.active = false;
+    this.autoT = null;
     this._loop = this._loop.bind(this);
   }
 
@@ -49,8 +50,12 @@ export class Roll {
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
 
-    const targetT = this.steps[this.idx]?.t ?? this.endT;
-    this.viewT += (targetT - this.viewT) * 0.18;
+    if (this.autoT != null) {
+      this.viewT = this.autoT;                 // mode Lecture : défilement continu
+    } else {
+      const targetT = this.steps[this.idx]?.t ?? this.endT;
+      this.viewT += (targetT - this.viewT) * 0.18;
+    }
     const ppb = H / (this.beatsPerMeasure * 2.2);   // ~2 mesures visibles
     const L = keyLayout(this.range[0], this.range[1], W);
     const yOf = t => H - (t - this.viewT) * ppb;

@@ -2,7 +2,7 @@
 import { noteName } from './listener.js';
 
 const HARMONIC = [12, 19, 24, 28, 31, 36, -12];
-const SETTLE_MS = 90;  // note répétée : délai avant d'écouter une nouvelle frappe
+const SETTLE_MS = 90;  // délai après un changement d'étape avant d'écouter une nouvelle frappe
 const REP_RISE_DB = 4; // note répétée : remontée suffisante (le son précédent n'est pas éteint)
 
 export class Practice {
@@ -85,14 +85,13 @@ export class Practice {
     const now = this.clock();
     for (const n of step.notes) {
       // « expliquée » : même note, ou harmonique d'une note de l'étape précédente
-      // (ex. Mi3 joué juste avant fait sonner Mi4) → il faudra une nouvelle attaque.
+      // (ex. Mi2 joué juste avant fait sonner Mi3) → seuil de remontée plus bas.
       const rep = [...prevMidis].some(r => explains.includes(n.midi - r));
       this.repeated[n.midi] = rep;
-      // la fenêtre courte (~85 ms) met un moment à « digérer » l'attaque précédente
-      this.settle[n.midi] = rep ? now + SETTLE_MS : 0;
-      this.valley[n.midi] = rep || !this.listener.running
-        ? this.listener.raw[n.midi]
-        : this.listener.minRecent(n.midi);
+      // On repart du niveau actuel, après un court délai : la frappe qui vient de valider
+      // l'étape précédente (et son bruit de marteau) ne doit pas valider celle-ci aussi.
+      this.settle[n.midi] = now + SETTLE_MS;
+      this.valley[n.midi] = this.listener.raw[n.midi];
     }
     this.prevMidis = prevMidis;
     // notes encore tenues d'après la partition (ex. ronde à la main gauche) : pas des erreurs
@@ -201,6 +200,17 @@ export class Practice {
     } else {
       this._error(m);
     }
+  }
+
+  // Mode Lecture : aller à une étape sans compter de statistiques
+  jumpTo(i) {
+    if (i >= this.steps.length) {
+      this.idx = this.steps.length;
+      this.keyboard.setExpected([]);
+      this.roll.setPosition(this.idx, new Set());
+      return;
+    }
+    this._enter(i, true);
   }
 
   next() { this._enter(this._firstPlayable(this.idx + 1), true); }

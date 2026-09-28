@@ -12,11 +12,13 @@ const HIST = 18;          // ~300 ms d'historique à 60 i/s pour détecter les m
 const RISE_DB = 7;        // montée minimale pour compter une attaque
 const REFRACTORY = 180;   // ms : pas deux attaques de la même touche plus rapprochées
 const GHOSTS = [12, 19, 24, 28, 31, 34, 36]; // écarts (demi-tons) des harmoniques 2 à 8
+const MIN_FLOOR_DB = -115;
 const REL_DB = 16;        // écart max avec la note la plus forte
 
 export const midiToFreq = m => 440 * Math.pow(2, (m - 69) / 12);
 const NAMES = ['Do', 'Do#', 'Ré', 'Mi♭', 'Mi', 'Fa', 'Fa#', 'Sol', 'Sol#', 'La', 'Si♭', 'Si'];
-export const noteName = (m, octave = true) => NAMES[m % 12] + (octave ? Math.floor(m / 12) - 1 : '');
+// Numérotation française des octaves : le Do du milieu du clavier (C4, MIDI 60) = Do3
+export const noteName = (m, octave = true) => NAMES[m % 12] + (octave ? Math.floor(m / 12) - 2 : '');
 
 // Sensibilité 1..10 → seuil en dB de saillance
 export const sensToThreshold = s => 21 - s * 1.5;
@@ -40,6 +42,7 @@ export class Listener {
     this.level = 0;
     this.floorDb = -100;
     this.frameMax = 0;
+    this.broadRise = 0;
     this._frame = 0;
   }
 
@@ -180,7 +183,9 @@ export class Listener {
       const [a, b] = this.bands[k];
       const arr = Array.from(sp.subarray(a, b + 1)).filter(Number.isFinite).sort((x, y) => x - y);
       // 30e centile : le « fond » de la bande, peu sensible aux pics des notes
-      const v = arr.length ? arr[Math.floor(arr.length * 0.3)] : -140;
+      // plancher réaliste : en dessous, ce n'est plus du bruit de micro mais du « vide »
+      // (compression audio, silence numérique) qui gonflerait artificiellement les notes
+      const v = Math.max(MIN_FLOOR_DB, arr.length ? arr[Math.floor(arr.length * 0.3)] : -140);
       this.bandFloor[k] = v;
       sum += v; n++;
     }
@@ -243,6 +248,15 @@ export class Listener {
     for (let m = LO; m <= HI; m++) if (this.sal[m] > mx) mx = this.sal[m];
     this.frameMax = mx;
 
+    // Montée « large bande » : le choc du marteau fait monter tout le spectre d'un coup.
+    // On mesure la montée médiane de toutes les touches pour ne garder que ce qui dépasse.
+    const rises = this._rises || (this._rises = new Float32Array(HI - LO + 1));
+    for (let m = LO; m <= HI; m++) rises[m - LO] = this.riseF(m);
+    const sorted = Float32Array.from(rises).sort();
+    // 25e centile : le bruit du marteau touche tout le spectre, alors que les harmoniques
+    // d'un accord n'en occupent qu'une partie (la médiane masquerait les accords).
+    this.broadRise = Math.max(0, sorted[Math.floor(sorted.length * 0.25)]);
+
     // Attaques détectées « à l'aveugle » (pour afficher les fausses notes)
     const onsets = [];
     const T = this.dynThreshold();
@@ -251,7 +265,7 @@ export class Listener {
       if (v < T) continue;
       if (v < this.sal[m - 1] || v < (this.sal[m + 1] || 0)) continue;
       if (!this._fundamentalOk(m)) continue;
-      if (this.rise(m) < RISE_DB || this.riseF(m) < RISE_DB * 0.7) continue;
+      if (this.rise(m) < RISE_DB || this.riseF(m) - this.broadRise < RISE_DB * 0.7) continue;
       onsets.push(m);
     }
     // Supprime les harmoniques fantômes (octave, quinte+octave…) d'une note plus grave,
@@ -316,7 +330,10 @@ export class Listener {
   // d'une autre note peuvent tomber sur celles de la note attendue.)
   isStruck(m, valley, rise = RISE_DB) {
     if (m < LO || m > HI) return false;
-    if (this.sal[m] < Math.max(this.threshold * 0.85, this.dynThreshold(4)) || !this._fundamentalOk(m)) return false;
+    const v = this.sal[m];
+    if (v < Math.max(this.threshold * 0.85, this.dynThreshold(4)) || !this._fundamentalOk(m)) return false;
+    // une voisine (±1–2 demi-tons) nettement plus forte : c'est elle qu'on entend
+    for (const d of [-2, -1, 1, 2]) if (this.sal[m + d] > v + 6) return false;
     return this.raw[m] - valley >= rise;
   }
 

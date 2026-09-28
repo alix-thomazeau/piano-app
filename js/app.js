@@ -5,6 +5,7 @@ import { Keyboard } from './keyboard.js';
 import { Sheet } from './sheet.js';
 import { Roll } from './roll.js';
 import { Practice } from './practice.js';
+import { AutoPlayer } from './autoplay.js';
 
 const $ = s => document.querySelector(s);
 const listener = createListener();
@@ -32,13 +33,16 @@ let sensitivity = getPref('sens', 5);
 listener.threshold = sensToThreshold(sensitivity);
 
 // ---------- bibliothèque ----------
+const DEMO_VERSION = 2; // v2 : main gauche en position de Do, doigtés logiques
 async function seedDemo() {
-  if (getPref('seeded', false)) return;
+  if (getPref('demoVersion', getPref('seeded', false) ? 1 : 0) >= DEMO_VERSION) return;
   try {
     const res = await fetch('demo/ode-a-la-joie.musicxml');
     const data = await res.arrayBuffer();
-    await putSong({ id: 'demo-ode', title: 'Ode à la joie (démo)', format: 'musicxml', data, addedAt: Date.now(), stats: {} });
-    setPref('seeded', true);
+    const old = await getSong('demo-ode');
+    await putSong({ id: 'demo-ode', title: 'Ode à la joie (démo)', format: 'musicxml', data,
+      addedAt: old?.addedAt || Date.now(), stats: old?.stats || {}, bpm: old?.bpm });
+    setPref('demoVersion', DEMO_VERSION);
   } catch (e) { console.warn('démo non chargée', e); }
 }
 
@@ -104,7 +108,7 @@ $('#file-input').addEventListener('change', async e => {
 $('#btn-help').addEventListener('click', () => $('#help-dialog').showModal());
 
 // ---------- pratique ----------
-const keyboard = new Keyboard($('#keyboard'), { onPress: m => practice.press(m) });
+const keyboard = new Keyboard($('#keyboard'), { onPress: m => { if (playMode !== 'auto' && !editing) practice.press(m); } });
 const sheet = new Sheet($('#sheet'), $('#sheet-wrap'));
 const roll = new Roll($('#roll'));
 let current = null; // morceau en cours
@@ -112,7 +116,10 @@ let view = getPref('view', 'sheet');
 
 const practice = new Practice({
   keyboard, sheet, roll, listener,
-  onProgress: (m, total) => { $('#progress-txt').textContent = total ? `Mesure ${m} / ${total}` : ''; },
+  onProgress: (m, total) => {
+    $('#progress-txt').textContent = total ? `Mesure ${m} / ${total}` : '';
+    if (editing) renderFingerPanel();
+  },
   onDone: async res => {
     $('#done-stats').innerHTML = `
       <div><b>${Math.round(res.accuracy * 100)} %</b><span>précision</span></div>
@@ -165,16 +172,19 @@ async function openSong(id) {
   $('#done-overlay').classList.add('hidden');
   $('#mic-error').textContent = '';
 
-  let steps, beatsPerMeasure;
+  auto.pause();
+  setEditing(false);
+  let steps, beatsPerMeasure, tempo;
   const isSheet = song.format !== 'midi';
   try {
     if (isSheet) {
       setView('sheet'); // la partition doit être visible pour être mise en page
-      ({ steps, beatsPerMeasure } = await sheet.load(song.data, song.format));
+      ({ steps, beatsPerMeasure, tempo } = await sheet.load(song.data, song.format));
     } else {
       $('#sheet').innerHTML = '';
-      ({ steps, beatsPerMeasure } = parseMidi(song.data));
+      ({ steps, beatsPerMeasure, tempo } = parseMidi(song.data));
     }
+    applyFingerOverrides(song, steps, isSheet);
   } catch (err) {
     console.error(err);
     toast('Erreur de lecture du fichier : ' + err.message, 5000);
@@ -187,7 +197,10 @@ async function openSong(id) {
   $('#seg-view [data-v="sheet"]').disabled = !isSheet;
   setView(isSheet ? view : 'roll');
   practice.load(steps, isSheet);
+  auto.setSong(steps, beatsPerMeasure);
+  setBpm(song.bpm || Math.min(200, Math.max(30, Math.round(tempo * 0.6 / 5) * 5)), false);
   window.__pc.practice = practice;
+  window.__pc.auto = auto;
 }
 
 function setView(v, remember) {
@@ -212,6 +225,7 @@ segment('#seg-hand', 'h', h => practice.setHand(h), 'both');
 segment('#seg-tol', 't', t => { practice.setTolerance(t); setPref('tol', t); }, getPref('tol', 'tolerant'));
 
 $('#btn-start-mic').addEventListener('click', async () => {
+  setPlayMode('listen');
   try {
     await listener.start();
     $('#mic-state').classList.add('on');
@@ -224,19 +238,170 @@ $('#btn-start-mic').addEventListener('click', async () => {
   }
 });
 $('#btn-start-touch').addEventListener('click', () => {
+  setPlayMode('listen');
   $('#practice-overlay').classList.add('hidden');
   practice.begin();
 });
-$('#btn-restart').addEventListener('click', () => { practice.restart(); practice.begin(); });
-$('#btn-next').addEventListener('click', () => practice.next());
-$('#btn-prev').addEventListener('click', () => practice.prev());
+$('#btn-start-auto').addEventListener('click', () => {
+  $('#practice-overlay').classList.add('hidden');
+  setPlayMode('auto');
+  auto.play();
+});
+$('#btn-restart').addEventListener('click', () => {
+  const wasPlaying = auto.playing;
+  auto.pause();
+  practice.restart();
+  if (playMode === 'auto') { auto.syncFromPractice(); if (wasPlaying) auto.play(); }
+  else practice.begin();
+});
+$('#btn-next').addEventListener('click', () => { auto.pause(); practice.next(); });
+$('#btn-prev').addEventListener('click', () => { auto.pause(); practice.prev(); });
 $('#btn-again').addEventListener('click', () => {
   $('#done-overlay').classList.add('hidden');
   practice.restart();
-  practice.begin();
+  if (playMode === 'auto') auto.play(); else practice.begin();
 });
 
+// ---------- mode Lecture (défilement automatique) ----------
+let playMode = 'listen';
+let autoStartedAt = 0;
+const auto = new AutoPlayer({
+  practice, roll,
+  onState: playing => {
+    $('#btn-play').textContent = playing ? '⏸' : '▶';
+    if (playing) autoStartedAt = performance.now();
+    else if (autoStartedAt) { practice.stats.activeMs += performance.now() - autoStartedAt; autoStartedAt = 0; }
+  },
+  onEnd: async () => {
+    $('#done-stats').innerHTML = `
+      <div><b>${auto.bpm}</b><span>bpm</span></div>
+      <div><b>${fmtDur(practice.stats.activeMs)}</b><span>de pratique</span></div>
+      <div class="full"><span>Conseil</span><b style="font-size:16px">Si c'était confortable, monte de 5 bpm.</b></div>`;
+    $('#done-overlay').classList.remove('hidden');
+    await saveSession(null, false);
+  },
+});
+
+function setPlayMode(m) {
+  playMode = m;
+  document.querySelectorAll('#seg-mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  $('#auto-ctrl').classList.toggle('hidden', m !== 'auto');
+  $('#seg-tol').classList.toggle('hidden', m === 'auto');
+  $('#mic-state').classList.toggle('hidden', m === 'auto');
+  if (m === 'auto') {
+    practice.pause();
+    listener.stop();
+    $('#mic-state').classList.remove('on');
+  } else {
+    auto.pause();
+    roll.autoT = null;
+  }
+}
+document.querySelectorAll('#seg-mode button').forEach(b => b.addEventListener('click', () => {
+  const m = b.dataset.mode;
+  if (m === playMode) return;
+  setPlayMode(m);
+  // repasser en Écoute : on redemande comment démarrer (micro ou toucher)
+  if (m === 'listen') $('#practice-overlay').classList.remove('hidden');
+}));
+
+function setBpm(v, save = true) {
+  v = Math.min(200, Math.max(20, v));
+  auto.setBpm(v);
+  $('#bpm-val').textContent = v;
+  if (save && current) {
+    current.bpm = v;
+    clearTimeout(setBpm._t);
+    setBpm._t = setTimeout(async () => {
+      const song = await getSong(current.id);
+      if (song) { song.bpm = v; await putSong(song); }
+    }, 800);
+  }
+}
+$('#btn-play').addEventListener('click', () => auto.toggle());
+$('#bpm-minus').addEventListener('click', () => setBpm(auto.bpm - 5));
+$('#bpm-plus').addEventListener('click', () => setBpm(auto.bpm + 5));
+auto.metronome = getPref('metro', true);
+auto.sound = getPref('sound', false);
+$('#btn-metro').classList.toggle('on', auto.metronome);
+$('#btn-sound').classList.toggle('on', auto.sound);
+$('#btn-metro').addEventListener('click', () => {
+  auto.metronome = !auto.metronome;
+  $('#btn-metro').classList.toggle('on', auto.metronome);
+  setPref('metro', auto.metronome);
+});
+$('#btn-sound').addEventListener('click', () => {
+  auto.sound = !auto.sound;
+  $('#btn-sound').classList.toggle('on', auto.sound);
+  setPref('sound', auto.sound);
+});
+document.addEventListener('keydown', e => {
+  if (mode === 'practice' && playMode === 'auto' && e.code === 'Space') { e.preventDefault(); auto.toggle(); }
+});
+
+// ---------- doigtés modifiables ----------
+let editing = false, wasRunning = false;
+function applyFingerOverrides(song, steps, isSheet) {
+  let any = false;
+  for (const [key, val] of Object.entries(song.fingers || {})) {
+    const [i, midi] = key.split(':').map(Number);
+    const n = steps[i]?.notes.find(x => x.midi === midi);
+    if (!n) continue;
+    n.finger = val;
+    if (isSheet) { sheet.setFinger(n.src, val); any = true; }
+  }
+  if (any) sheet.rerender();
+}
+function setEditing(on) {
+  if (on === editing) return;
+  editing = on;
+  $('#btn-fingers').classList.toggle('on', on);
+  $('#finger-panel').classList.toggle('hidden', !on);
+  if (on) {
+    auto.pause();
+    wasRunning = practice.running;
+    practice.running = false; // on n'avance plus au micro pendant l'édition
+    renderFingerPanel();
+  } else if (wasRunning && playMode === 'listen') {
+    practice.begin();
+  }
+}
+function renderFingerPanel() {
+  const step = practice.steps[practice.idx];
+  const rows = $('#finger-rows');
+  rows.innerHTML = '';
+  if (!step) { rows.textContent = 'Fin du morceau.'; return; }
+  const notes = [...step.notes].sort((a, b) => (a.hand === b.hand ? b.midi - a.midi : a.hand === 'R' ? -1 : 1));
+  for (const n of notes) {
+    const row = document.createElement('div');
+    row.className = 'finger-row';
+    row.innerHTML = `<span class="who ${n.hand}">${n.hand === 'R' ? 'MD' : 'MG'} · ${noteName(n.midi)}</span>`;
+    for (const f of ['1', '2', '3', '4', '5', '']) {
+      const b = document.createElement('button');
+      b.className = 'btn ghost' + ((n.finger || '') === f ? ' on' : '');
+      b.textContent = f || '✕';
+      b.title = f ? `Doigt ${f}` : 'Aucun doigté';
+      b.addEventListener('click', () => changeFinger(practice.idx, n, f));
+      row.appendChild(b);
+    }
+    rows.appendChild(row);
+  }
+}
+async function changeFinger(stepIdx, n, value) {
+  n.finger = value;
+  if (current.format !== 'midi') { sheet.setFinger(n.src, value); sheet.rerender(); }
+  practice._render();
+  renderFingerPanel();
+  const song = await getSong(current.id);
+  if (!song) return;
+  song.fingers = { ...(song.fingers || {}), [`${stepIdx}:${n.midi}`]: value };
+  await putSong(song);
+}
+$('#btn-fingers').addEventListener('click', () => setEditing(!editing));
+
 async function goLibrary() {
+  auto.pause();
+  setEditing(false);
   if (mode === 'practice') {
     practice.pause();
     await saveSession(null, false);
@@ -252,8 +417,9 @@ async function goLibrary() {
 $('#btn-back').addEventListener('click', goLibrary);
 $('#btn-done-back').addEventListener('click', goLibrary);
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && mode === 'practice') { practice.pause(); saveSession(null, false); }
-  else if (!document.hidden && mode === 'practice' && $('#practice-overlay').classList.contains('hidden')) practice.begin();
+  if (document.hidden && mode === 'practice') { auto.pause(); practice.pause(); saveSession(null, false); }
+  else if (!document.hidden && mode === 'practice' && playMode === 'listen' && !editing
+    && $('#practice-overlay').classList.contains('hidden')) practice.begin();
 });
 
 // ---------- test du micro ----------

@@ -47,7 +47,8 @@ export function parseMidi(buffer) {
     }
   }
   const title = (midi.name || '').trim();
-  return { title, steps, beatsPerMeasure };
+  const tempo = Math.round(midi.header.tempos[0]?.bpm || 100);
+  return { title, steps, beatsPerMeasure, tempo };
 }
 
 // ---------- MusicXML (via OpenSheetMusicDisplay déjà chargé) ----------
@@ -75,7 +76,7 @@ export function stepsFromOsmd(osmd) {
       if (notes.some(n => n.midi === midi)) continue;
       const finger = note.Fingering?.value || note.Fingering?.Value || '';
       const dur = (note.NoteTie ? note.NoteTie.Duration?.RealValue ?? note.Length.RealValue : note.Length.RealValue) * 4;
-      notes.push({ midi, hand: handOf(note), dur, finger: String(finger).trim() });
+      notes.push({ midi, hand: handOf(note), dur, finger: String(finger).trim(), src: note });
     }
     const measureIdx = it.CurrentMeasureIndex;
     const m = it.CurrentMeasure;
@@ -87,7 +88,8 @@ export function stepsFromOsmd(osmd) {
     idx++;
   }
   cursor.reset();
-  return { steps, beatsPerMeasure };
+  const tempo = Math.round(osmd.Sheet.DefaultStartTempoInBpm || osmd.Sheet.userStartTempoInBPM || 100);
+  return { steps, beatsPerMeasure, tempo };
 }
 
 // Étendue du morceau → plage de clavier à afficher (octaves entières, 2 min.)

@@ -80,6 +80,40 @@ export class Sheet {
     this.colored = [];
   }
 
+  // Change (ou retire si value vide) le doigté d'une note, sans redessiner
+  setFinger(note, value) {
+    if (!note) return;
+    const ve = note.ParentVoiceEntry;
+    const lib = window.opensheetmusicdisplay;
+    const existing = ve.TechnicalInstructions.find(t => t.sourceNote === note && t.type === lib.TechnicalInstructionType.Fingering);
+    if (value) {
+      if (existing) existing.value = value;
+      else {
+        const t = new lib.TechnicalInstruction();
+        t.type = lib.TechnicalInstructionType.Fingering;
+        t.value = value;
+        t.sourceNote = note;
+        t.placement = 4; // placement automatique (comme les doigtés lus dans le fichier)
+        ve.TechnicalInstructions.push(t);
+        note.Fingering = t;
+      }
+    } else if (existing) {
+      ve.TechnicalInstructions = ve.TechnicalInstructions.filter(t => t !== existing);
+      note.Fingering = undefined;
+    }
+  }
+
+  // Redessine la partition en gardant la position du curseur
+  rerender() {
+    const pos = this.cursorPos;
+    this.osmd.render();
+    this.colored = [];
+    this.osmd.cursor.show();
+    this.osmd.cursor.reset();
+    this.cursorPos = 0;
+    this.goTo(pos);
+  }
+
   flashCursor(color) {
     const el = this.osmd?.cursor?.cursorElement;
     if (!el) return;
